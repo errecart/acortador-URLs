@@ -1,4 +1,5 @@
 import { createLink, deleteLink, getLink, listLinks } from './store.js';
+import { events } from './events.js';
 import { HttpError, readJsonBody, sendJson } from './http-utils.js';
 
 const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
@@ -30,6 +31,7 @@ export async function handleLinks(req, res) {
     }
 
     const link = await createLink(destination.href);
+    events.emit('link:created', { code: link.code, at: new Date().toISOString() });
     sendJson(res, 201, {
       ...link,
       shortUrl: `${baseUrl.replace(/\/+$/, '')}/${link.code}`,
@@ -54,6 +56,22 @@ export async function handleRedirect(res, code) {
 
   res.writeHead(302, { Location: link.url });
   res.end();
+  events.emit('link:visited', { code, at: new Date().toISOString() });
+}
+
+export async function handleLinkStats(res, code) {
+  const link = await getLink(code);
+  if (!link) {
+    throw new HttpError(404, 'Not Found');
+  }
+
+  sendJson(res, 200, {
+    code: link.code,
+    url: link.url,
+    createdAt: link.createdAt,
+    visits: link.visits,
+    lastVisitedAt: link.lastVisitedAt,
+  });
 }
 
 export async function handleDeleteLink(res, code) {
@@ -61,6 +79,7 @@ export async function handleDeleteLink(res, code) {
     throw new HttpError(404, 'Not Found');
   }
 
+  events.emit('link:deleted', { code, at: new Date().toISOString() });
   res.writeHead(204);
   res.end();
 }

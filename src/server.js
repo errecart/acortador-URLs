@@ -1,7 +1,9 @@
 import { createServer } from 'node:http';
 import { HttpError, sendJson } from './http-utils.js';
 import { routeRequest } from './router.js';
-import { initStore } from './store.js';
+import { flushStore, initStore } from './store.js';
+import { closeAccessLog } from './access-log.js';
+import './stats.js';
 
 const port = process.env.PORT || 3000;
 
@@ -36,3 +38,43 @@ await initStore();
 server.listen(port, () => {
   console.log(`Servidor escuchando en el puerto ${port}`);
 });
+
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`Recibida señal ${signal}; guardando cambios...`);
+
+  try {
+    await flushStore();
+  } catch (err) {
+    console.error('No se pudieron persistir los cambios al cerrar:', err);
+    process.exitCode = 1;
+  }
+
+  server.close(async (err) => {
+    if (err) {
+      console.error('No se pudo cerrar el servidor correctamente:', err);
+      process.exitCode = 1;
+    }
+
+    try {
+      await flushStore();
+    } catch (flushErr) {
+      console.error('No se pudieron persistir los cambios pendientes al cerrar:', flushErr);
+      process.exitCode = 1;
+    }
+
+    try {
+      await closeAccessLog();
+    } catch (logErr) {
+      console.error('No se pudo cerrar el log de accesos:', logErr);
+      process.exitCode = 1;
+    }
+  });
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));

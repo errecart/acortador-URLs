@@ -7,6 +7,8 @@ const dataDir = resolve(process.env.DATA_DIR || './data');
 const linksFile = join(dataDir, 'links.json');
 const tempLinksFile = `${linksFile}.tmp`;
 let writeQueue = Promise.resolve();
+let visitsDirty = false;
+let visitsFlushTimer;
 
 export async function initStore() {
   await mkdir(dataDir, { recursive: true });
@@ -43,7 +45,11 @@ export async function initStore() {
 
   links.clear();
   for (const link of storedLinks) {
-    links.set(link.code, link);
+    links.set(link.code, {
+      ...link,
+      visits: link.visits ?? 0,
+      lastVisitedAt: link.lastVisitedAt ?? null,
+    });
   }
 }
 
@@ -56,13 +62,53 @@ function persistLinks() {
   return write;
 }
 
+function scheduleVisitsFlush() {
+  if (visitsFlushTimer) {
+    return;
+  }
+
+  visitsFlushTimer = setTimeout(() => {
+    visitsFlushTimer = undefined;
+    flushStore().catch((err) => {
+      console.error('No se pudieron persistir las visitas:', err);
+      scheduleVisitsFlush();
+    });
+  }, 1000);
+}
+
+export async function flushStore() {
+  if (visitsFlushTimer) {
+    clearTimeout(visitsFlushTimer);
+    visitsFlushTimer = undefined;
+  }
+
+  if (!visitsDirty) {
+    await writeQueue;
+    return;
+  }
+
+  visitsDirty = false;
+  try {
+    await persistLinks();
+  } catch (err) {
+    visitsDirty = true;
+    throw err;
+  }
+}
+
 export async function createLink(url) {
   let code;
   do {
     code = randomBytes(5).toString('base64url');
   } while (links.has(code));
 
-  const link = { code, url, createdAt: new Date().toISOString() };
+  const link = {
+    code,
+    url,
+    createdAt: new Date().toISOString(),
+    visits: 0,
+    lastVisitedAt: null,
+  };
   links.set(code, link);
   await persistLinks();
   return link;
@@ -70,6 +116,19 @@ export async function createLink(url) {
 
 export async function getLink(code) {
   return links.get(code);
+}
+
+export async function recordVisit(code, at = new Date().toISOString()) {
+  const link = links.get(code);
+  if (!link) {
+    return false;
+  }
+
+  link.visits += 1;
+  link.lastVisitedAt = at;
+  visitsDirty = true;
+  scheduleVisitsFlush();
+  return true;
 }
 
 export async function deleteLink(code) {

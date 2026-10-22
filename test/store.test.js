@@ -8,7 +8,14 @@ const originalDataDir = process.env.DATA_DIR;
 const dataDir = await mkdtemp(join(tmpdir(), 'acortador-urls-'));
 process.env.DATA_DIR = dataDir;
 
-const { createLink, deleteLink, initStore, listLinks } = await import('../src/store.js');
+const {
+  createLink,
+  deleteLink,
+  flushStore,
+  initStore,
+  listLinks,
+  recordVisit,
+} = await import('../src/store.js');
 const linksFile = join(dataDir, 'links.json');
 
 after(async () => {
@@ -35,7 +42,17 @@ test('loads and persists links, and does not overwrite invalid JSON', async () =
   const savedLink = { code: 'abc1234', url: 'https://saved.example/', createdAt: '2026-01-01T00:00:00.000Z' };
   await writeFile(linksFile, JSON.stringify([savedLink]));
   await initStore();
-  assert.deepEqual(await listLinks(), [savedLink]);
+  assert.deepEqual(await listLinks(), [{ ...savedLink, visits: 0, lastVisitedAt: null }]);
+
+  const lastVisitedAt = '2026-01-02T00:00:00.000Z';
+  assert.equal(await recordVisit(savedLink.code, lastVisitedAt), true);
+  assert.equal(JSON.parse(await readFile(linksFile, 'utf8'))[0].visits, undefined);
+  await flushStore();
+  assert.deepEqual(JSON.parse(await readFile(linksFile, 'utf8')), [{
+    ...savedLink,
+    visits: 1,
+    lastVisitedAt,
+  }]);
 });
 
 test('serializes concurrent writes and persists deletions', async () => {

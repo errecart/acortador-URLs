@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import { HttpError, sendJson } from '../src/http-utils.js';
 import { routeRequest } from '../src/router.js';
 import { initStore } from '../src/store.js';
+import { events } from '../src/events.js';
+import '../src/stats.js';
 
 const server = createServer(async (req, res) => {
   try {
@@ -32,6 +34,13 @@ after(async () => {
 });
 
 test('creates valid links and redirects with a temporary redirect', async () => {
+  const receivedEvents = [];
+  const captureEvent = (event) => (payload) => receivedEvents.push({ event, payload });
+  const onCreated = captureEvent('link:created');
+  const onVisited = captureEvent('link:visited');
+  events.on('link:created', onCreated);
+  events.on('link:visited', onVisited);
+
   const response = await fetch(`${baseUrl}/api/links`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -40,7 +49,14 @@ test('creates valid links and redirects with a temporary redirect', async () => 
 
   assert.equal(response.status, 201);
   const link = await response.json();
-  assert.deepEqual(Object.keys(link).sort(), ['code', 'createdAt', 'shortUrl', 'url']);
+  assert.deepEqual(Object.keys(link).sort(), [
+    'code',
+    'createdAt',
+    'lastVisitedAt',
+    'shortUrl',
+    'url',
+    'visits',
+  ]);
   assert.match(link.code, /^[\w-]{7}$/);
   assert.equal(link.url, 'https://example.com/path');
   assert.ok(Number.isFinite(Date.parse(link.createdAt)));
@@ -54,6 +70,24 @@ test('creates valid links and redirects with a temporary redirect', async () => 
   const redirect = await fetch(`${baseUrl}/${link.code}`, { redirect: 'manual' });
   assert.equal(redirect.status, 302);
   assert.equal(redirect.headers.get('location'), link.url);
+
+  const statsResponse = await fetch(`${baseUrl}/api/links/${link.code}/stats`);
+  assert.equal(statsResponse.status, 200);
+  assert.deepEqual(await statsResponse.json(), {
+    code: link.code,
+    url: link.url,
+    createdAt: link.createdAt,
+    visits: 1,
+    lastVisitedAt: receivedEvents[1].payload.at,
+  });
+
+  events.off('link:created', onCreated);
+  events.off('link:visited', onVisited);
+  assert.deepEqual(receivedEvents.map(({ event }) => event), ['link:created', 'link:visited']);
+  for (const { payload } of receivedEvents) {
+    assert.equal(payload.code, link.code);
+    assert.ok(Number.isFinite(Date.parse(payload.at)));
+  }
 
   const missingLink = await fetch(`${baseUrl}/does-not-exist`);
   assert.equal(missingLink.status, 404);
@@ -88,10 +122,22 @@ test('deletes links and returns 404 when the link does not exist', async () => {
   });
   const link = await createdResponse.json();
 
+  const deletedEvents = [];
+  const onDeleted = (payload) => deletedEvents.push(payload);
+  events.on('link:deleted', onDeleted);
   const deletedResponse = await fetch(`${baseUrl}/api/links/${link.code}`, { method: 'DELETE' });
+  events.off('link:deleted', onDeleted);
   assert.equal(deletedResponse.status, 204);
   assert.equal(await deletedResponse.text(), '');
+  assert.deepEqual(deletedEvents.map(({ code }) => code), [link.code]);
+  assert.ok(Number.isFinite(Date.parse(deletedEvents[0].at)));
 
   const missingResponse = await fetch(`${baseUrl}/api/links/${link.code}`, { method: 'DELETE' });
   assert.equal(missingResponse.status, 404);
+  assert.equal(deletedEvents.length, 1);
+});
+
+test('returns 404 for stats of a missing link', async () => {
+  const response = await fetch(`${baseUrl}/api/links/abc1234/stats`);
+  assert.equal(response.status, 404);
 });

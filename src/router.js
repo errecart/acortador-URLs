@@ -1,4 +1,10 @@
-import { handleDeleteLink, handleHealth, handleLinks, handleRedirect } from './handlers.js';
+import {
+  handleDeleteLink,
+  handleHealth,
+  handleLinkStats,
+  handleLinks,
+  handleRedirect,
+} from './handlers.js';
 import { HttpError } from './http-utils.js';
 
 export async function routeRequest(req, res, url) {
@@ -11,6 +17,17 @@ export async function routeRequest(req, res, url) {
 
   if (pathname === '/api/links') {
     await handleLinks(req, res);
+    return;
+  }
+
+  const statsMatch = pathname.match(/^\/api\/links\/([\w-]{7})\/stats$/);
+  if (statsMatch) {
+    if (req.method !== 'GET') {
+      res.setHeader('Allow', 'GET');
+      throw new HttpError(405, 'Method Not Allowed');
+    }
+
+    await handleLinkStats(res, statsMatch[1]);
     return;
   }
 
