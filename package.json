@@ -1,0 +1,32 @@
+{
+  "name": "acortador-urls",
+  "version": "1.0.0",
+  "description": "Acortador de URLs con servidor HTTP nativo de Node.js.",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node --watch --env-file=.env src/server.js",
+    "start": "node --env-file=.env src/server.js",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/errecart/acortador-URLs.git"
+  },
+  "keywords": [
+    "url-shortener",
+    "shortener",
+    "nodejs",
+    "http"
+  ],
+  "author": "errecart",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "private": true,
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/errecart/acortador-URLs/issues"
+  },
+  "homepage": "https://github.com/errecart/acortador-URLs#readme"
+}
