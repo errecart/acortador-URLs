@@ -4,9 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const originalDataDir = process.env.DATA_DIR;
 const dataDir = await mkdtemp(join(tmpdir(), 'acortador-urls-'));
-process.env.DATA_DIR = dataDir;
 
 const {
   createStore,
@@ -16,11 +14,6 @@ const linksFile = join(dataDir, 'links.json');
 
 after(async () => {
   await rm(dataDir, { recursive: true, force: true });
-  if (originalDataDir === undefined) {
-    delete process.env.DATA_DIR;
-  } else {
-    process.env.DATA_DIR = originalDataDir;
-  }
 });
 
 test('starts empty, persists links, and rejects invalid JSON or link formats', async () => {

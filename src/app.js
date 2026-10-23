@@ -44,9 +44,11 @@ export function createApp({ store }) {
     try {
       await routeRequest(req, res, url, store);
     } catch (err) {
-      console.error(err);
+      const status = err instanceof HttpError ? err.status : 500;
+      if (!(err instanceof HttpError) || status >= 500) {
+        console.error(err);
+      }
       if (!res.headersSent) {
-        const status = err instanceof HttpError ? err.status : 500;
         const message = err instanceof HttpError ? err.message : 'Error interno del servidor';
         sendJson(res, status, { error: message });
       }

@@ -1,9 +1,14 @@
 import { createApp } from './app.js';
 import { createStore } from './store.js';
-import { closeAccessLog } from './access-log.js';
+import { createAccessLog } from './access-log.js';
+import { events } from './events.js';
 
 const port = process.env.PORT || 3000;
 const store = createStore({ dataDir: process.env.DATA_DIR || './data' });
+const accessLog = await createAccessLog({
+  dataDir: process.env.DATA_DIR || './data',
+  events,
+});
 const server = createApp({ store });
 
 server.on('error', (err) => {
@@ -11,10 +16,25 @@ server.on('error', (err) => {
   process.exit(1);
 });
 
-await store.initStore();
-server.listen(port, () => {
-  console.log(`Servidor escuchando en el puerto ${port}`);
-});
+let storeInitialized = false;
+try {
+  await store.initStore();
+  storeInitialized = true;
+} catch (err) {
+  console.error(`No se pudo inicializar el almacén: ${err.message}`);
+  process.exitCode = 1;
+  try {
+    await accessLog.close();
+  } catch (closeErr) {
+    console.error(`No se pudo cerrar el log de accesos: ${closeErr.message}`);
+  }
+}
+
+if (storeInitialized) {
+  server.listen(port, () => {
+    console.log(`Servidor escuchando en el puerto ${port}`);
+  });
+}
 
 let shuttingDown = false;
 async function shutdown(signal) {
@@ -49,7 +69,7 @@ async function shutdown(signal) {
     }
 
     try {
-      await closeAccessLog();
+      await accessLog.close();
     } catch (logErr) {
       console.error('No se pudo cerrar el log de accesos:', logErr);
       process.exitCode = 1;
@@ -57,5 +77,7 @@ async function shutdown(signal) {
   });
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+if (storeInitialized) {
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+}

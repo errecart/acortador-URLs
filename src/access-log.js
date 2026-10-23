@@ -2,23 +2,41 @@ import { createWriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { finished } from 'node:stream/promises';
-import { events } from './events.js';
 
-const dataDir = resolve(process.env.DATA_DIR || './data');
-await mkdir(dataDir, { recursive: true });
+export async function createAccessLog({ dataDir = './data', events }) {
+  if (!events) {
+    throw new TypeError('Se requiere un emisor de eventos para el log de accesos');
+  }
 
-const accessLog = createWriteStream(join(dataDir, 'access.log'), { flags: 'a' });
-accessLog.on('error', (err) => {
-  console.error('No se pudo escribir el log de accesos:', err);
-});
+  const resolvedDataDir = resolve(dataDir);
+  await mkdir(resolvedDataDir, { recursive: true });
 
-for (const event of ['link:created', 'link:deleted', 'link:visited']) {
-  events.on(event, (payload) => {
-    accessLog.write(`${JSON.stringify({ event, ...payload })}\n`);
+  const accessLog = createWriteStream(join(resolvedDataDir, 'access.log'), { flags: 'a' });
+  accessLog.on('error', (err) => {
+    console.error('No se pudo escribir el log de accesos:', err);
   });
-}
 
-export async function closeAccessLog() {
-  accessLog.end();
-  await finished(accessLog);
+  const listeners = new Map();
+  for (const event of ['link:created', 'link:deleted', 'link:visited']) {
+    const listener = (payload) => {
+      accessLog.write(`${JSON.stringify({ event, ...payload })}\n`);
+    };
+    listeners.set(event, listener);
+    events.on(event, listener);
+  }
+
+  let closePromise;
+  return {
+    close() {
+      if (closePromise) {
+        return closePromise;
+      }
+      for (const [event, listener] of listeners) {
+        events.off(event, listener);
+      }
+      closePromise = finished(accessLog);
+      accessLog.end();
+      return closePromise;
+    },
+  };
 }

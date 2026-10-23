@@ -71,5 +71,11 @@ export async function serveStatic(req, res, pathname) {
     'Content-Type': contentTypes.get(extension) || 'application/octet-stream',
     'Content-Length': fileInfo.size,
   });
-  await pipeline(createReadStream(filePath), res);
+  try {
+    await pipeline(createReadStream(filePath), res);
+  } catch (err) {
+    if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+      throw err;
+    }
+  }
 }

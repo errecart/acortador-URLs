@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
+import { Writable } from 'node:stream';
 import { after, before, test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const originalDataDir = process.env.DATA_DIR;
 const dataDir = await mkdtemp(join(tmpdir(), 'acortador-static-'));
-process.env.DATA_DIR = dataDir;
 
-const [{ createApp }, { createStore }] = await Promise.all([
+const [{ createApp }, { createStore }, { serveStatic }] = await Promise.all([
   import('../src/app.js'),
   import('../src/store.js'),
+  import('../src/static.js'),
 ]);
 const store = createStore({ dataDir });
 const server = createApp({ store });
@@ -35,11 +35,6 @@ after(async () => {
   });
   await store.flushStore();
   await rm(dataDir, { recursive: true, force: true });
-  if (originalDataDir === undefined) {
-    delete process.env.DATA_DIR;
-  } else {
-    process.env.DATA_DIR = originalDataDir;
-  }
 });
 
 test('serves the home page as HTML', async () => {
@@ -81,4 +76,17 @@ test('rejects null bytes in static paths with 400', async () => {
   const missing = await fetch(`${baseUrl}/missing.css`);
   assert.equal(missing.status, 404);
   assertSecurityHeaders(missing);
+});
+
+test('ignores a prematurely closed response stream', async () => {
+  class ClosedResponse extends Writable {
+    writeHead() {}
+
+    _write(_chunk, _encoding, callback) {
+      callback();
+      this.destroy();
+    }
+  }
+
+  await assert.doesNotReject(serveStatic({ method: 'GET' }, new ClosedResponse(), '/styles.css'));
 });

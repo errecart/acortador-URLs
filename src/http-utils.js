@@ -15,7 +15,6 @@ export function sendJson(res, status, data) {
 }
 
 function rejectOversizedBody(res) {
-  res.shouldKeepAlive = false;
   res.setHeader('Connection', 'close');
   sendJson(res, 413, { error: oversizedBodyMessage });
 }

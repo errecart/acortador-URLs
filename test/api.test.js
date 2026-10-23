@@ -6,14 +6,12 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const originalDataDir = process.env.DATA_DIR;
 const originalBaseUrl = process.env.BASE_URL;
 const originalApiUrl = process.env.API_URL;
 const originalRequestTimeout = process.env.REQUEST_TIMEOUT_MS;
 const originalHeadersTimeout = process.env.HEADERS_TIMEOUT_MS;
 const originalKeepAliveTimeout = process.env.KEEP_ALIVE_TIMEOUT_MS;
 const dataDir = await mkdtemp(join(tmpdir(), 'acortador-api-'));
-process.env.DATA_DIR = dataDir;
 process.env.BASE_URL = 'http://127.0.0.1:3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
 process.env.HEADERS_TIMEOUT_MS = '500';
@@ -51,11 +49,6 @@ after(async () => {
     } else {
       process.env[name] = value;
     }
-  }
-  if (originalDataDir === undefined) {
-    delete process.env.DATA_DIR;
-  } else {
-    process.env.DATA_DIR = originalDataDir;
   }
   if (originalBaseUrl === undefined) {
     delete process.env.BASE_URL;
@@ -175,6 +168,40 @@ test('health responds and restricts methods with Allow', async () => {
   assert.equal(wrongMethod.headers.get('allow'), 'GET');
 });
 
+test('does not log client errors but logs server errors', async () => {
+  const originalConsoleError = console.error;
+  const loggedErrors = [];
+  console.error = (...args) => loggedErrors.push(args);
+
+  let failingServer;
+  try {
+    const notFound = await fetch(`${baseUrl}/not-a-route`);
+    assert.equal(notFound.status, 404);
+    assert.deepEqual(loggedErrors, []);
+
+    failingServer = createApp({
+      store: {
+        listLinks: async () => {
+          throw new Error('store failure');
+        },
+      },
+    });
+    await new Promise((resolve) => failingServer.listen(0, '127.0.0.1', resolve));
+    const failingUrl = `http://127.0.0.1:${failingServer.address().port}/api/links`;
+    const serverError = await fetch(failingUrl);
+    assert.equal(serverError.status, 500);
+    assert.equal(loggedErrors.length, 1);
+    assert.match(loggedErrors[0][0].message, /store failure/);
+  } finally {
+    console.error = originalConsoleError;
+    if (failingServer?.listening) {
+      await new Promise((resolve, reject) => {
+        failingServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  }
+});
+
 test('creates and redirects links, and stats count visits', async () => {
   const response = await createLink('https://example.com/path');
   assert.equal(response.status, 201);
@@ -264,7 +291,6 @@ test('rejects oversized JSON bodies with Content-Length and drains the request',
   });
 
   assert.equal(response.status, 413);
-  assertSecurityHeaders(response);
   assertSecurityHeaders(response);
   assert.equal(response.headers.get('connection'), 'close');
   assert.deepEqual(await response.json(), { error: 'El cuerpo de la solicitud supera el límite de 10 KB' });
