@@ -3,11 +3,8 @@
 import { createInterface } from 'node:readline/promises';
 import { parseArgs, styleText } from 'node:util';
 
-process.loadEnvFile();
-
 const usage = `Uso:
   acortador-urls [--api <URL>] [--help]
-  acortador-urls [start] [--api <URL>]
   acortador-urls create <url> [--api <URL>]
   acortador-urls list [--json] [--api <URL>]
   acortador-urls stats <code> [--api <URL>]
@@ -69,8 +66,8 @@ function truncate(value, maxLength) {
 }
 
 function printLinksTable(links) {
-  const codeWidth = Math.max(4, ...links.map(({ code }) => String(code).length));
-  const visitsWidth = Math.max(6, ...links.map(({ visits }) => String(visits).length));
+  const codeWidth = Math.max('CÓDIGO'.length, ...links.map(({ code }) => String(code).length));
+  const visitsWidth = Math.max('VISITAS'.length, ...links.map(({ visits }) => String(visits).length));
   const terminalWidth = process.stdout.columns || 100;
   const urlWidth = Math.max(12, Math.min(60, terminalWidth - codeWidth - visitsWidth - 6));
   const header = `${'CÓDIGO'.padEnd(codeWidth)}  ${'VISITAS'.padEnd(visitsWidth)}  URL`;
@@ -137,7 +134,7 @@ async function run(args) {
     console.log(usage);
     return;
   }
-  if (!['start', 'create', 'list', 'stats', 'delete'].includes(command)) {
+  if (!['create', 'list', 'stats', 'delete'].includes(command)) {
     throw new UsageError(`Comando desconocido: ${command}`);
   }
   if (values.json && command !== 'list') {
@@ -145,15 +142,6 @@ async function run(args) {
   }
   if (values.yes && command !== 'delete') {
     throw new UsageError('--yes solo se puede usar con delete.');
-  }
-
-  if (command === 'start') {
-    if (commandArgs.length !== 0) {
-      throw new UsageError('start no acepta argumentos.');
-    }
-    process.env.API_URL = apiUrl;
-    await import('../src/server.js');
-    return;
   }
 
   if (command === 'create') {
@@ -176,6 +164,8 @@ async function run(args) {
     const links = await request(apiUrl, '/api/links');
     if (values.json) {
       console.log(JSON.stringify(links, null, 2));
+    } else if (links.length === 0) {
+      console.log('No hay enlaces.');
     } else {
       printLinksTable(links);
     }

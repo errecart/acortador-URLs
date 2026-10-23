@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node --env-file=.env src/server.js",
+    "prestart:secure": "node -e \"require('node:fs').mkdirSync('data', { recursive: true })\"",
+    "start:secure": "node scripts/start-secure.js",
     "test": "node --test"
   },
   "repository": {

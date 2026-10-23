@@ -9,13 +9,9 @@ const dataDir = await mkdtemp(join(tmpdir(), 'acortador-urls-'));
 process.env.DATA_DIR = dataDir;
 
 const {
-  createLink,
-  deleteLink,
-  flushStore,
-  initStore,
-  listLinks,
-  recordVisit,
+  createStore,
 } = await import('../src/store.js');
+const { createLink, deleteLink, flushStore, initStore, listLinks, recordVisit } = createStore({ dataDir });
 const linksFile = join(dataDir, 'links.json');
 
 after(async () => {
@@ -27,7 +23,7 @@ after(async () => {
   }
 });
 
-test('loads and persists links, and does not overwrite invalid JSON', async () => {
+test('starts empty, persists links, and rejects invalid JSON or link formats', async () => {
   await initStore();
   assert.deepEqual(await listLinks(), []);
 
@@ -38,6 +34,11 @@ test('loads and persists links, and does not overwrite invalid JSON', async () =
   await writeFile(linksFile, invalidContents);
   await assert.rejects(initStore(), /JSON inválido/);
   assert.equal(await readFile(linksFile, 'utf8'), invalidContents);
+
+  const invalidFormat = JSON.stringify({ links: [] });
+  await writeFile(linksFile, invalidFormat);
+  await assert.rejects(initStore(), /formato de los enlaces es inválido/);
+  assert.equal(await readFile(linksFile, 'utf8'), invalidFormat);
 
   const savedLink = { code: 'abc1234', url: 'https://saved.example/', createdAt: '2026-01-01T00:00:00.000Z' };
   await writeFile(linksFile, JSON.stringify([savedLink]));
@@ -74,21 +75,26 @@ test('serializes concurrent writes and persists deletions', async () => {
     JSON.parse(await readFile(linksFile, 'utf8')),
     createdLinks.slice(1),
   );
+});
 
-  await rm(linksFile);
-  await mkdir(linksFile);
-  await assert.rejects(createLink('https://example.com/failing-write'));
-  assert.ok(!(await listLinks()).some((link) => link.url === 'https://example.com/failing-write'));
-  await rm(linksFile, { recursive: true });
+test('rolls back in-memory changes when the data directory is deleted', async () => {
+  const rollbackDataDir = await mkdtemp(join(tmpdir(), 'acortador-rollback-'));
+  const rollbackStore = createStore({ dataDir: rollbackDataDir });
+  try {
+    await rollbackStore.initStore();
+    const existingLink = await rollbackStore.createLink('https://example.com/existing');
+    await rm(rollbackDataDir, { recursive: true });
 
-  const afterFailure = await createLink('https://example.com/after-failure');
-  assert.ok(JSON.parse(await readFile(linksFile, 'utf8')).some((link) => link.code === afterFailure.code));
+    await assert.rejects(rollbackStore.createLink('https://example.com/failing-create'));
+    assert.deepEqual(await rollbackStore.listLinks(), [existingLink]);
 
-  await rm(linksFile);
-  await mkdir(linksFile);
-  await assert.rejects(deleteLink(afterFailure.code));
-  assert.ok((await listLinks()).some((link) => link.code === afterFailure.code));
-  await rm(linksFile, { recursive: true });
-  assert.equal(await deleteLink(afterFailure.code), true);
-  assert.ok(!(await listLinks()).some((link) => link.code === afterFailure.code));
+    await assert.rejects(rollbackStore.deleteLink(existingLink.code));
+    assert.deepEqual(await rollbackStore.listLinks(), [existingLink]);
+
+    await mkdir(rollbackDataDir, { recursive: true });
+    const recoveredLink = await rollbackStore.createLink('https://example.com/recovered');
+    assert.ok((await rollbackStore.listLinks()).some(({ code }) => code === recoveredLink.code));
+  } finally {
+    await rm(rollbackDataDir, { recursive: true, force: true });
+  }
 });

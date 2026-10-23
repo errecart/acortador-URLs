@@ -33,20 +33,23 @@ function isInsidePublicDir(filePath) {
 export async function serveStatic(req, res, pathname) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET');
-    throw new HttpError(405, 'Method Not Allowed');
+    throw new HttpError(405, 'Método no permitido');
   }
 
   let decodedPath;
   try {
     decodedPath = decodeURIComponent(pathname);
   } catch {
-    throw new HttpError(400, 'Bad Request');
+    throw new HttpError(400, 'Solicitud incorrecta');
+  }
+  if (decodedPath.includes('\0')) {
+    throw new HttpError(400, 'Solicitud incorrecta');
   }
 
   const requestPath = decodedPath === '/' ? '/index.html' : decodedPath;
   const filePath = join(publicDir, requestPath.replace(/^[/\\]+/, ''));
   if (!isInsidePublicDir(filePath)) {
-    throw new HttpError(404, 'Not Found');
+    throw new HttpError(404, 'No encontrado');
   }
 
   let fileInfo;
@@ -54,20 +57,19 @@ export async function serveStatic(req, res, pathname) {
     fileInfo = await stat(filePath);
   } catch (err) {
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
-      throw new HttpError(404, 'Not Found');
+      throw new HttpError(404, 'No encontrado');
     }
     throw err;
   }
 
   if (!fileInfo.isFile()) {
-    throw new HttpError(404, 'Not Found');
+    throw new HttpError(404, 'No encontrado');
   }
 
   const extension = extname(filePath).toLowerCase();
   res.writeHead(200, {
     'Content-Type': contentTypes.get(extension) || 'application/octet-stream',
     'Content-Length': fileInfo.size,
-    'X-Content-Type-Options': 'nosniff',
   });
   await pipeline(createReadStream(filePath), res);
 }

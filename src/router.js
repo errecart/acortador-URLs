@@ -17,7 +17,7 @@ function hasStaticFileExtension(pathname) {
   }
 }
 
-export async function routeRequest(req, res, url) {
+export async function routeRequest(req, res, url, store) {
   const { pathname } = url;
 
   if (pathname === '/health') {
@@ -26,7 +26,7 @@ export async function routeRequest(req, res, url) {
   }
 
   if (pathname === '/api/links') {
-    await handleLinks(req, res);
+    await handleLinks(req, res, store);
     return;
   }
 
@@ -34,10 +34,10 @@ export async function routeRequest(req, res, url) {
   if (statsMatch) {
     if (req.method !== 'GET') {
       res.setHeader('Allow', 'GET');
-      throw new HttpError(405, 'Method Not Allowed');
+      throw new HttpError(405, 'Método no permitido');
     }
 
-    await handleLinkStats(res, statsMatch[1]);
+    await handleLinkStats(res, statsMatch[1], store);
     return;
   }
 
@@ -45,10 +45,10 @@ export async function routeRequest(req, res, url) {
   if (linkMatch) {
     if (req.method !== 'DELETE') {
       res.setHeader('Allow', 'DELETE');
-      throw new HttpError(405, 'Method Not Allowed');
+      throw new HttpError(405, 'Método no permitido');
     }
 
-    await handleDeleteLink(res, linkMatch[1]);
+    await handleDeleteLink(res, linkMatch[1], store);
     return;
   }
 
@@ -56,10 +56,10 @@ export async function routeRequest(req, res, url) {
   if (codeMatch) {
     if (req.method !== 'GET') {
       res.setHeader('Allow', 'GET');
-      throw new HttpError(405, 'Method Not Allowed');
+      throw new HttpError(405, 'Método no permitido');
     }
 
-    await handleRedirect(res, codeMatch[1]);
+    await handleRedirect(res, codeMatch[1], store);
     return;
   }
 
@@ -68,5 +68,5 @@ export async function routeRequest(req, res, url) {
     return;
   }
 
-  throw new HttpError(404, 'Not Found');
+  throw new HttpError(404, 'No encontrado');
 }

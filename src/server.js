@@ -1,40 +1,17 @@
-import { createServer } from 'node:http';
-import { HttpError, sendJson } from './http-utils.js';
-import { routeRequest } from './router.js';
-import { flushStore, initStore } from './store.js';
+import { createApp } from './app.js';
+import { createStore } from './store.js';
 import { closeAccessLog } from './access-log.js';
-import './stats.js';
 
 const port = process.env.PORT || 3000;
-
-const server = createServer(async (req, res) => {
-  let url;
-
-  try {
-    url = new URL(req.url, 'http://localhost');
-  } catch {
-    sendJson(res, 400, { error: 'Bad Request' });
-    return;
-  }
-
-  try {
-    await routeRequest(req, res, url);
-  } catch (err) {
-    console.error(err);
-    if (!res.headersSent) {
-      const status = err instanceof HttpError ? err.status : 500;
-      const message = err instanceof HttpError ? err.message : 'Internal Server Error';
-      sendJson(res, status, { error: message });
-    }
-  }
-});
+const store = createStore({ dataDir: process.env.DATA_DIR || './data' });
+const server = createApp({ store });
 
 server.on('error', (err) => {
   console.error(`No se pudo iniciar el servidor en el puerto ${port}:`, err);
   process.exit(1);
 });
 
-await initStore();
+await store.initStore();
 server.listen(port, () => {
   console.log(`Servidor escuchando en el puerto ${port}`);
 });
@@ -52,7 +29,7 @@ async function shutdown(signal) {
     process.exit(1);
   }, 10_000).unref();
   try {
-    await flushStore();
+    await store.flushStore();
   } catch (err) {
     console.error('No se pudieron persistir los cambios al cerrar:', err);
     process.exitCode = 1;
@@ -65,7 +42,7 @@ async function shutdown(signal) {
     }
 
     try {
-      await flushStore();
+      await store.flushStore();
     } catch (flushErr) {
       console.error('No se pudieron persistir los cambios pendientes al cerrar:', flushErr);
       process.exitCode = 1;

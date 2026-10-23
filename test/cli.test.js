@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
+const cliPath = fileURLToPath(new URL('../bin/acortador.js', import.meta.url));
 const code = 'abc1234';
 const link = {
   code,
@@ -12,6 +17,7 @@ const link = {
   lastVisitedAt: '2026-10-23T12:05:00.000Z',
 };
 let deletedCount = 0;
+let listedLinks = [link];
 let apiUrl;
 
 const server = createServer(async (req, res) => {
@@ -26,7 +32,7 @@ const server = createServer(async (req, res) => {
 
   if (req.method === 'GET' && req.url === '/api/links') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify([link]));
+    res.end(JSON.stringify(listedLinks));
     return;
   }
 
@@ -44,7 +50,7 @@ const server = createServer(async (req, res) => {
   }
 
   res.writeHead(404, { 'content-type': 'application/json' });
-  res.end(JSON.stringify({ error: 'Not Found' }));
+  res.end(JSON.stringify({ error: 'No encontrado' }));
 });
 
 before(async () => {
@@ -58,30 +64,55 @@ after(async () => {
   });
 });
 
-function runCli(args) {
-  return runCliWithApi(args, apiUrl);
-}
-
-function runCliWithApi(args, configuredApiUrl) {
+function executeCli(args, { cwd = process.cwd(), env = process.env } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['bin/acortador.js', ...args], {
-      env: { ...process.env, API_URL: configuredApiUrl },
-      stdio: ['pipe', 'pipe', 'pipe'],
+    execFile(process.execPath, [cliPath, ...args], {
+      cwd,
+      env,
+    }, (err, stdout, stderr) => {
+      if (err && typeof err.code !== 'number') {
+        reject(err);
+        return;
+      }
+      resolve({ status: err ? err.code : 0, stdout, stderr });
     });
-    let stdout = '';
-    let stderr = '';
-    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
-    child.stderr.setEncoding('utf8').on('data', (chunk) => { stderr += chunk; });
-    child.on('error', reject);
-    child.on('close', (status) => resolve({ status, stdout, stderr }));
-    child.stdin.end();
   });
 }
 
+function runCli(args, configuredApiUrl = apiUrl, cwd = process.cwd()) {
+  return executeCli([...args, '--api', configuredApiUrl], { cwd });
+}
+
 test('shows help for no arguments and reports unknown commands on stderr', async () => {
+  const directoryWithoutEnv = await mkdtemp(join(tmpdir(), 'acortador-urls-'));
+  let helpWithoutEnv;
+  try {
+    helpWithoutEnv = await runCli(['--help'], apiUrl, directoryWithoutEnv);
+  } finally {
+    await rm(directoryWithoutEnv, { recursive: true, force: true });
+  }
+  assert.equal(helpWithoutEnv.status, 0);
+  assert.match(helpWithoutEnv.stdout, /acortador-urls create <url>/);
+  assert.equal(helpWithoutEnv.stderr, '');
+
+  const otherProject = await mkdtemp(join(tmpdir(), 'acortador-other-project-'));
+  let cliWithOtherProjectEnv;
+  try {
+    await writeFile(join(otherProject, '.env'), 'API_URL=http://127.0.0.1:1\n');
+    const env = { ...process.env, BASE_URL: apiUrl };
+    delete env.API_URL;
+    cliWithOtherProjectEnv = await executeCli(['list', '--json'], { cwd: otherProject, env });
+  } finally {
+    await rm(otherProject, { recursive: true, force: true });
+  }
+  assert.equal(cliWithOtherProjectEnv.status, 0, cliWithOtherProjectEnv.stderr);
+  assert.deepEqual(JSON.parse(cliWithOtherProjectEnv.stdout), [link]);
+  assert.equal(cliWithOtherProjectEnv.stderr, '');
+
   const help = await runCli([]);
   assert.equal(help.status, 0);
   assert.match(help.stdout, /acortador-urls create <url>/);
+  assert.doesNotMatch(help.stdout, /\[start\]/);
   assert.equal(help.stderr, '');
 
   const helpFlag = await runCli(['--help']);
@@ -95,6 +126,10 @@ test('shows help for no arguments and reports unknown commands on stderr', async
   assert.match(unknown.stderr, /Uso:/);
   assert.equal(unknown.stdout, '');
   assert.doesNotMatch(unknown.stderr, /\u001b\[/);
+
+  const removedStart = await runCli(['start']);
+  assert.equal(removedStart.status, 2);
+  assert.match(removedStart.stderr, /Comando desconocido: start/);
 
   const invalidOptions = await runCli(['list', '--invalid']);
   assert.equal(invalidOptions.status, 2);
@@ -117,11 +152,30 @@ test('list prints a truncated table or JSON', async () => {
   assert.match(table.stdout, /CÓDIGO\s+VISITAS\s+URL/);
   assert.match(table.stdout, /abc1234\s+4\s+https:\/\/example\.com/);
   assert.match(table.stdout, /…/);
+  const [header, separator] = table.stdout.split('\n');
+  const [codeSeparator, visitsSeparator] = separator.split('  ');
+  assert.equal(codeSeparator.length, 'CÓDIGO'.length + 1);
+  assert.equal(visitsSeparator.length, 'VISITAS'.length);
+  assert.equal(header.indexOf('VISITAS'), codeSeparator.length + 2);
+  assert.equal(header.indexOf('URL'), codeSeparator.length + visitsSeparator.length + 4);
   assert.equal(table.stderr, '');
 
   const json = await runCli(['list', '--json']);
   assert.equal(json.status, 0, json.stderr);
   assert.deepEqual(JSON.parse(json.stdout), [link]);
+
+  listedLinks = [];
+  try {
+    const empty = await runCli(['list']);
+    assert.equal(empty.status, 0, empty.stderr);
+    assert.equal(empty.stdout, 'No hay enlaces.\n');
+
+    const emptyJson = await runCli(['list', '--json']);
+    assert.equal(emptyJson.status, 0, emptyJson.stderr);
+    assert.deepEqual(JSON.parse(emptyJson.stdout), []);
+  } finally {
+    listedLinks = [link];
+  }
 });
 
 test('stats prints link details', async () => {
@@ -149,7 +203,7 @@ test('delete requires confirmation on non-TTY stdin unless --yes is set', async 
 test('returns 1 for API errors', async () => {
   const result = await runCli(['stats', 'missing']);
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Not Found/);
+  assert.match(result.stderr, /No encontrado/);
   assert.doesNotMatch(result.stderr, /Uso:/);
 });
 
@@ -162,7 +216,7 @@ test('reports a clear connection error when the server is unavailable', async ()
   });
 
   const unavailableApi = `http://127.0.0.1:${port}`;
-  const result = await runCliWithApi(['list'], unavailableApi);
+  const result = await runCli(['list'], unavailableApi);
   assert.equal(result.status, 1);
   assert.match(result.stderr, new RegExp(`No pude conectarme a ${unavailableApi}, ¿está corriendo el servidor\\?`));
   assert.match(result.stderr, /ECONNREFUSED/);
