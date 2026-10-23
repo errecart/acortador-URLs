@@ -42,11 +42,15 @@ server.listen(port, () => {
 let shuttingDown = false;
 async function shutdown(signal) {
   if (shuttingDown) {
-    return;
+    console.error(`Segunda señal (${signal}); forzando salida.`);
+    process.exit(1);
   }
   shuttingDown = true;
   console.log(`Recibida señal ${signal}; guardando cambios...`);
-
+    setTimeout(() => {
+    console.error('Cierre demasiado lento; forzando salida.');
+    process.exit(1);
+  }, 10_000).unref();
   try {
     await flushStore();
   } catch (err) {

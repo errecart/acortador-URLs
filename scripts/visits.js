@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 
-const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+const baseUrl = (process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 const redirectCount = 1000;
 
 const createResponse = await fetch(`${baseUrl}/api/links`, {

@@ -5,7 +5,17 @@ import {
   handleLinks,
   handleRedirect,
 } from './handlers.js';
+import { extname } from 'node:path';
 import { HttpError } from './http-utils.js';
+import { serveStatic } from './static.js';
+
+function hasStaticFileExtension(pathname) {
+  try {
+    return extname(decodeURIComponent(pathname)) !== '';
+  } catch {
+    return true;
+  }
+}
 
 export async function routeRequest(req, res, url) {
   const { pathname } = url;
@@ -50,6 +60,11 @@ export async function routeRequest(req, res, url) {
     }
 
     await handleRedirect(res, codeMatch[1]);
+    return;
+  }
+
+  if (pathname === '/' || hasStaticFileExtension(pathname)) {
+    await serveStatic(req, res, pathname);
     return;
   }
 

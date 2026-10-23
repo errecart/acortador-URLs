@@ -60,7 +60,7 @@ test('creates valid links and redirects with a temporary redirect', async () => 
   assert.match(link.code, /^[\w-]{7}$/);
   assert.equal(link.url, 'https://example.com/path');
   assert.ok(Number.isFinite(Date.parse(link.createdAt)));
-  const configuredBaseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+  const configuredBaseUrl = (process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
   assert.equal(link.shortUrl, `${configuredBaseUrl}/${link.code}`);
 
   const linksResponse = await fetch(`${baseUrl}/api/links`);
@@ -98,6 +98,42 @@ test('creates valid links and redirects with a temporary redirect', async () => 
   }
 });
 
+test('serves the vanilla frontend and its assets', async () => {
+  const pageResponse = await fetch(`${baseUrl}/`);
+  assert.equal(pageResponse.status, 200);
+  assert.match(pageResponse.headers.get('content-type'), /text\/html/);
+  assert.equal(pageResponse.headers.get('x-content-type-options'), 'nosniff');
+  const pageBody = await pageResponse.arrayBuffer();
+  assert.equal(Number(pageResponse.headers.get('content-length')), pageBody.byteLength);
+  assert.match(Buffer.from(pageBody).toString(), /id="create-form"/);
+
+  const appResponse = await fetch(`${baseUrl}/app.js`);
+  assert.equal(appResponse.status, 200);
+  assert.match(appResponse.headers.get('content-type'), /javascript/);
+  const appScript = await appResponse.text();
+  assert.match(appScript, /textContent/);
+  assert.doesNotMatch(appScript, /innerHTML/);
+
+  const stylesResponse = await fetch(`${baseUrl}/styles.css`);
+  assert.equal(stylesResponse.status, 200);
+  assert.match(stylesResponse.headers.get('content-type'), /text\/css/);
+});
+
+test('validates static paths and accepts only GET', async () => {
+  const methodResponse = await fetch(`${baseUrl}/app.js`, { method: 'HEAD' });
+  assert.equal(methodResponse.status, 405);
+  assert.equal(methodResponse.headers.get('allow'), 'GET');
+
+  const malformedPathResponse = await fetch(`${baseUrl}/%E0%A4%A`);
+  assert.equal(malformedPathResponse.status, 400);
+
+  const traversalResponse = await fetch(`${baseUrl}/%2e%2e%2f.env`);
+  assert.equal(traversalResponse.status, 404);
+
+  const directoryResponse = await fetch(`${baseUrl}/missing/`);
+  assert.equal(directoryResponse.status, 404);
+});
+
 test('rejects malformed JSON and non-HTTP(S) URLs', async () => {
   const malformedJson = await fetch(`${baseUrl}/api/links`, {
     method: 'POST',
@@ -112,6 +148,45 @@ test('rejects malformed JSON and non-HTTP(S) URLs', async () => {
     body: JSON.stringify({ url: 'javascript:alert(1)' }),
   });
   assert.equal(invalidUrl.status, 400);
+});
+
+test('emits creation and deletion events after sending responses', async () => {
+  const onCreated = () => {
+    throw new Error('creation listener failed');
+  };
+  events.on('link:created', onCreated);
+
+  let createdResponse;
+  try {
+    createdResponse = await fetch(`${baseUrl}/api/links`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.com/listener-error' }),
+    });
+  } finally {
+    events.off('link:created', onCreated);
+  }
+
+  assert.equal(createdResponse.status, 201);
+  const link = await createdResponse.json();
+  const linksResponse = await fetch(`${baseUrl}/api/links`);
+  assert.ok((await linksResponse.json()).some(({ code }) => code === link.code));
+
+  const onDeleted = () => {
+    throw new Error('deletion listener failed');
+  };
+  events.on('link:deleted', onDeleted);
+
+  let deletedResponse;
+  try {
+    deletedResponse = await fetch(`${baseUrl}/api/links/${link.code}`, { method: 'DELETE' });
+  } finally {
+    events.off('link:deleted', onDeleted);
+  }
+
+  assert.equal(deletedResponse.status, 204);
+  const deletedLinksResponse = await fetch(`${baseUrl}/api/links`);
+  assert.ok(!(await deletedLinksResponse.json()).some(({ code }) => code === link.code));
 });
 
 test('deletes links and returns 404 when the link does not exist', async () => {

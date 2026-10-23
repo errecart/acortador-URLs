@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+const baseUrl = (process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 const dataDir = resolve(process.env.DATA_DIR || './data');
 const expectedCount = 50;
 

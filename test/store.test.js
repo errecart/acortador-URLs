@@ -78,8 +78,17 @@ test('serializes concurrent writes and persists deletions', async () => {
   await rm(linksFile);
   await mkdir(linksFile);
   await assert.rejects(createLink('https://example.com/failing-write'));
+  assert.ok(!(await listLinks()).some((link) => link.url === 'https://example.com/failing-write'));
   await rm(linksFile, { recursive: true });
 
   const afterFailure = await createLink('https://example.com/after-failure');
   assert.ok(JSON.parse(await readFile(linksFile, 'utf8')).some((link) => link.code === afterFailure.code));
+
+  await rm(linksFile);
+  await mkdir(linksFile);
+  await assert.rejects(deleteLink(afterFailure.code));
+  assert.ok((await listLinks()).some((link) => link.code === afterFailure.code));
+  await rm(linksFile, { recursive: true });
+  assert.equal(await deleteLink(afterFailure.code), true);
+  assert.ok(!(await listLinks()).some((link) => link.code === afterFailure.code));
 });

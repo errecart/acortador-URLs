@@ -53,13 +53,19 @@ export async function initStore() {
   }
 }
 
-function persistLinks() {
-  const write = writeQueue.then(async () => {
-    await writeFile(tempLinksFile, JSON.stringify([...links.values()], null, 2));
-    await rename(tempLinksFile, linksFile);
-  });
+function enqueueStoreOperation(operation) {
+  const write = writeQueue.then(operation);
   writeQueue = write.catch(() => {});
   return write;
+}
+
+async function writeLinks() {
+  await writeFile(tempLinksFile, JSON.stringify([...links.values()], null, 2));
+  await rename(tempLinksFile, linksFile);
+}
+
+function persistLinks() {
+  return enqueueStoreOperation(writeLinks);
 }
 
 function scheduleVisitsFlush() {
@@ -97,21 +103,28 @@ export async function flushStore() {
 }
 
 export async function createLink(url) {
-  let code;
-  do {
-    code = randomBytes(5).toString('base64url');
-  } while (links.has(code));
+  return enqueueStoreOperation(async () => {
+    let code;
+    do {
+      code = randomBytes(5).toString('base64url');
+    } while (links.has(code));
 
-  const link = {
-    code,
-    url,
-    createdAt: new Date().toISOString(),
-    visits: 0,
-    lastVisitedAt: null,
-  };
-  links.set(code, link);
-  await persistLinks();
-  return link;
+    const link = {
+      code,
+      url,
+      createdAt: new Date().toISOString(),
+      visits: 0,
+      lastVisitedAt: null,
+    };
+    links.set(code, link);
+    try {
+      await writeLinks();
+    } catch (err) {
+      links.delete(code);
+      throw err;
+    }
+    return link;
+  });
 }
 
 export async function getLink(code) {
@@ -132,12 +145,21 @@ export async function recordVisit(code, at = new Date().toISOString()) {
 }
 
 export async function deleteLink(code) {
-  if (!links.delete(code)) {
-    return false;
-  }
+  return enqueueStoreOperation(async () => {
+    const link = links.get(code);
+    if (!link) {
+      return false;
+    }
 
-  await persistLinks();
-  return true;
+    links.delete(code);
+    try {
+      await writeLinks();
+    } catch (err) {
+      links.set(code, link);
+      throw err;
+    }
+    return true;
+  });
 }
 
 export async function listLinks() {
