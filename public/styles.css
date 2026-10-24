@@ -6,7 +6,7 @@
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   --ink: #1c2b2a;
-  --muted: #788582;
+  --muted: #5f706b;
   --green: #146c5b;
   --line: #e8edeb;
 }
@@ -191,7 +191,7 @@ h1 span {
 }
 
 .input-row input::placeholder {
-  color: #a4afac;
+  color: #64736f;
 }
 
 .input-row input:focus {
@@ -266,7 +266,7 @@ h1 span {
   border: 1px solid #e5ebe8;
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.65);
-  color: #697874;
+  color: var(--muted);
   font-size: 11px;
 }
 
@@ -313,7 +313,7 @@ h1 span {
   max-width: 470px;
   margin: 5px 0 0;
   overflow: hidden;
-  color: #8a9693;
+  color: var(--muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -331,7 +331,7 @@ h1 span {
 }
 
 .visit-count {
-  color: #77837f;
+  color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -401,7 +401,7 @@ h1 span {
 
 .site-footer {
   padding: 44px 0 28px;
-  color: #9aa5a2;
+  color: var(--muted);
   font-size: 11px;
   text-align: center;
 }
@@ -436,6 +436,11 @@ h1 span {
   }
 
   .button-primary {
+    min-height: 44px;
+  }
+
+  .button-secondary,
+  .button-delete {
     min-height: 44px;
   }
 

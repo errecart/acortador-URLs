@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter, once } from 'node:events';
 import { request as httpRequest } from 'node:http';
 import { createConnection } from 'node:net';
 import { after, before, test } from 'node:test';
@@ -6,24 +7,22 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const originalBaseUrl = process.env.BASE_URL;
-const originalApiUrl = process.env.API_URL;
 const originalRequestTimeout = process.env.REQUEST_TIMEOUT_MS;
 const originalHeadersTimeout = process.env.HEADERS_TIMEOUT_MS;
 const originalKeepAliveTimeout = process.env.KEEP_ALIVE_TIMEOUT_MS;
 const dataDir = await mkdtemp(join(tmpdir(), 'acortador-api-'));
-process.env.BASE_URL = 'http://127.0.0.1:3000';
 process.env.REQUEST_TIMEOUT_MS = '2000';
 process.env.HEADERS_TIMEOUT_MS = '500';
 process.env.KEEP_ALIVE_TIMEOUT_MS = '750';
-delete process.env.API_URL;
 
 const [{ createApp }, { createStore }] = await Promise.all([
   import('../src/app.js'),
   import('../src/store.js'),
 ]);
 const store = createStore({ dataDir });
-const server = createApp({ store });
+const configuredBaseUrl = new URL('http://127.0.0.1:3000');
+const events = new EventEmitter();
+const server = createApp({ store, baseUrl: configuredBaseUrl, events });
 let baseUrl;
 
 before(async () => {
@@ -50,16 +49,6 @@ after(async () => {
       process.env[name] = value;
     }
   }
-  if (originalBaseUrl === undefined) {
-    delete process.env.BASE_URL;
-  } else {
-    process.env.BASE_URL = originalBaseUrl;
-  }
-  if (originalApiUrl === undefined) {
-    delete process.env.API_URL;
-  } else {
-    process.env.API_URL = originalApiUrl;
-  }
 });
 
 async function createLink(url) {
@@ -67,6 +56,33 @@ async function createLink(url) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ url }),
+  });
+}
+
+function postWithContentType(contentType) {
+  return new Promise((resolve, reject) => {
+    const { hostname, port } = new URL(baseUrl);
+    const headers = {};
+    if (contentType !== undefined) {
+      headers['content-type'] = contentType;
+    }
+
+    const req = httpRequest({
+      hostname,
+      port,
+      path: '/api/links',
+      method: 'POST',
+      headers,
+    }, (res) => {
+      const responseChunks = [];
+      res.on('data', (chunk) => responseChunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        body: Buffer.concat(responseChunks).toString('utf8'),
+      }));
+    });
+    req.on('error', reject);
+    req.end(JSON.stringify({ url: 'https://example.com/content-type-check' }));
   });
 }
 
@@ -165,7 +181,12 @@ test('health responds and restricts methods with Allow', async () => {
   const wrongMethod = await fetch(`${baseUrl}/health`, { method: 'POST' });
   assert.equal(wrongMethod.status, 405);
   assertSecurityHeaders(wrongMethod);
-  assert.equal(wrongMethod.headers.get('allow'), 'GET');
+  assert.equal(wrongMethod.headers.get('allow'), 'GET, HEAD');
+
+  const headHealth = await fetch(`${baseUrl}/health`, { method: 'HEAD' });
+  assert.equal(headHealth.status, 200);
+  assertSecurityHeaders(headHealth);
+  assert.equal(await headHealth.text(), '');
 });
 
 test('does not log client errors but logs server errors', async () => {
@@ -180,6 +201,8 @@ test('does not log client errors but logs server errors', async () => {
     assert.deepEqual(loggedErrors, []);
 
     failingServer = createApp({
+      baseUrl: configuredBaseUrl,
+      events: new EventEmitter(),
       store: {
         listLinks: async () => {
           throw new Error('store failure');
@@ -203,6 +226,7 @@ test('does not log client errors but logs server errors', async () => {
 });
 
 test('creates and redirects links, and stats count visits', async () => {
+  const createdEventPromise = once(events, 'link:created');
   const response = await createLink('https://example.com/path');
   assert.equal(response.status, 201);
   assertSecurityHeaders(response);
@@ -210,13 +234,19 @@ test('creates and redirects links, and stats count visits', async () => {
   assert.match(link.code, /^[\w-]{7}$/);
   assert.equal(link.url, 'https://example.com/path');
   assert.equal(link.visits, 0);
-  const configuredBaseUrl = process.env.BASE_URL.replace(/\/+$/, '');
-  assert.equal(link.shortUrl, `${configuredBaseUrl}/${link.code}`);
+  assert.equal(link.shortUrl, `${configuredBaseUrl.origin}/${link.code}`);
+  const [createdEvent] = await createdEventPromise;
+  assert.equal(createdEvent.code, link.code);
+  assert.ok(Number.isFinite(Date.parse(createdEvent.at)));
 
+  const visitedEventPromise = once(events, 'link:visited');
   const redirect = await fetch(`${baseUrl}/${link.code}`, { redirect: 'manual' });
   assert.equal(redirect.status, 302);
   assertSecurityHeaders(redirect);
   assert.equal(redirect.headers.get('location'), link.url);
+  const [visitedEvent] = await visitedEventPromise;
+  assert.equal(visitedEvent.code, link.code);
+  assert.ok(Number.isFinite(Date.parse(visitedEvent.at)));
 
   const stats = await fetch(`${baseUrl}/api/links/${link.code}/stats`);
   assert.equal(stats.status, 200);
@@ -224,6 +254,50 @@ test('creates and redirects links, and stats count visits', async () => {
   const data = await stats.json();
   assert.equal(data.visits, 1);
   assert.ok(Number.isFinite(Date.parse(data.lastVisitedAt)));
+
+  const headRedirect = await fetch(`${baseUrl}/${link.code}`, {
+    method: 'HEAD',
+    redirect: 'manual',
+  });
+  assert.equal(headRedirect.status, 302);
+  assertSecurityHeaders(headRedirect);
+  assert.equal(headRedirect.headers.get('location'), link.url);
+  assert.equal(await headRedirect.text(), '');
+});
+
+test('uses BASE_URL for short links and self-link validation', async () => {
+  const configuredServer = createApp({
+    store,
+    baseUrl: new URL('http://base.example:4000'),
+    events: new EventEmitter(),
+  });
+
+  try {
+    await new Promise((resolve) => configuredServer.listen(0, '127.0.0.1', resolve));
+    const configuredUrl = `http://127.0.0.1:${configuredServer.address().port}`;
+    const response = await fetch(`${configuredUrl}/api/links`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.com/configured-base' }),
+    });
+    assert.equal(response.status, 201);
+    const link = await response.json();
+    assert.equal(link.shortUrl, `http://base.example:4000/${link.code}`);
+
+    const selfLink = await fetch(`${configuredUrl}/api/links`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: 'https://base.example/another-short-link' }),
+    });
+    assert.equal(selfLink.status, 400);
+    assert.deepEqual(await selfLink.json(), { error: 'No se pueden acortar URLs del mismo dominio' });
+  } finally {
+    if (configuredServer.listening) {
+      await new Promise((resolve, reject) => {
+        configuredServer.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
+  }
 });
 
 test('validates JSON and destination URLs', async () => {
@@ -259,6 +333,18 @@ test('validates JSON and destination URLs', async () => {
   assert.equal(embeddedCredentials.status, 400);
   assertSecurityHeaders(embeddedCredentials);
   assert.deepEqual(await embeddedCredentials.json(), { error: 'La URL no puede incluir usuario ni contraseña' });
+});
+
+test('rejects POST requests without an application/json Content-Type', async () => {
+  const initialLinkCount = (await store.listLinks()).length;
+
+  for (const contentType of ['text/plain', 'application/x-www-form-urlencoded', undefined]) {
+    const response = await postWithContentType(contentType);
+    assert.equal(response.status, 415);
+    assert.deepEqual(JSON.parse(response.body), { error: 'El Content-Type debe ser application/json' });
+  }
+
+  assert.equal((await store.listLinks()).length, initialLinkCount);
 });
 
 test('accepts URLs up to 2048 characters and rejects longer URLs and own-domain destinations', async () => {
@@ -324,7 +410,7 @@ test('returns 404 for missing resources and 405 with Allow for wrong methods', a
   const statsWrongMethod = await fetch(`${baseUrl}/api/links/abc1234/stats`, { method: 'POST' });
   assert.equal(statsWrongMethod.status, 405);
   assertSecurityHeaders(statsWrongMethod);
-  assert.equal(statsWrongMethod.headers.get('allow'), 'GET');
+  assert.equal(statsWrongMethod.headers.get('allow'), 'GET, HEAD');
 
   const linkWrongMethod = await fetch(`${baseUrl}/api/links/abc1234`);
   assert.equal(linkWrongMethod.status, 405);
@@ -334,7 +420,7 @@ test('returns 404 for missing resources and 405 with Allow for wrong methods', a
   const redirectWrongMethod = await fetch(`${baseUrl}/abc1234`, { method: 'POST' });
   assert.equal(redirectWrongMethod.status, 405);
   assertSecurityHeaders(redirectWrongMethod);
-  assert.equal(redirectWrongMethod.headers.get('allow'), 'GET');
+  assert.equal(redirectWrongMethod.headers.get('allow'), 'GET, HEAD');
 });
 
 test('deletes links and returns 404 when the link does not exist', async () => {

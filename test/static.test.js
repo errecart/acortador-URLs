@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import { request as httpRequest } from 'node:http';
 import { Writable } from 'node:stream';
 import { after, before, test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -13,7 +15,11 @@ const [{ createApp }, { createStore }, { serveStatic }] = await Promise.all([
   import('../src/static.js'),
 ]);
 const store = createStore({ dataDir });
-const server = createApp({ store });
+const server = createApp({
+  store,
+  baseUrl: new URL('http://localhost:3000'),
+  events: new EventEmitter(),
+});
 let baseUrl;
 
 function assertSecurityHeaders(response) {
@@ -21,6 +27,26 @@ function assertSecurityHeaders(response) {
   assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
   assert.equal(response.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
   assert.equal(response.headers.get('x-frame-options'), 'DENY');
+}
+
+function requestRawPath(path) {
+  return new Promise((resolve, reject) => {
+    const { port } = new URL(baseUrl);
+    const req = httpRequest({
+      hostname: '127.0.0.1',
+      port,
+      path,
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => resolve({
+        status: res.statusCode,
+        body: Buffer.concat(chunks).toString('utf8'),
+      }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
 }
 
 before(async () => {
@@ -42,29 +68,47 @@ test('serves the home page as HTML', async () => {
   assert.equal(response.status, 200);
   assertSecurityHeaders(response);
   assert.match(response.headers.get('content-type'), /text\/html/);
-  assert.match(await response.text(), /id="create-form"/);
+  const html = await response.text();
+  assert.match(html, /id="create-form"/);
+  assert.match(html, /name="description"/);
+  assert.match(html, /href="\/favicon\.svg"/);
+});
+
+test('serves HEAD requests without a body', async () => {
+  const response = await fetch(`${baseUrl}/`, { method: 'HEAD' });
+  assert.equal(response.status, 200);
+  assertSecurityHeaders(response);
+  assert.match(response.headers.get('content-type'), /text\/html/);
+  assert.ok(Number(response.headers.get('content-length')) > 0);
+  assert.equal(await response.text(), '');
+});
+
+test('serves the favicon as SVG', async () => {
+  const response = await fetch(`${baseUrl}/favicon.svg`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /image\/svg\+xml/);
+  assert.match(await response.text(), /<svg/);
 });
 
 test('rejects traversal paths without serving or leaking files', async () => {
   const traversalPaths = [
-    '/%2e%2e%2f.env',
-    '/%2e%2e/.env',
-    '/..%2f.env',
-    '/%2e%2e%5c.env',
-    '/%252e%252e%252f.env',
-    '/%252e%252e%255c.env',
-    '/%2e%2e%252f.env',
-    '/%252e%252e%2f.env',
-    '/%2e%2e%5c%2e%2e%5c.env',
-    '/%2e%2e/%2e%2e/.env',
-    '/%252e%252e%252f%252e%252e%252f.env',
+    '/%2e%2e%2fpackage.json',
+    '/%2e%2e/package.json',
+    '/..%2fpackage.json',
+    '/%2e%2e%5cpackage.json',
+    '/%252e%252e%252fpackage.json',
+    '/%252e%252e%255cpackage.json',
+    '/%2e%2e%252fpackage.json',
+    '/%252e%252e%2fpackage.json',
+    '/%2e%2e%5c%2e%2e%5cpackage.json',
+    '/%2e%2e/%2e%2e/package.json',
+    '/%252e%252e%252f%252e%252e%252fpackage.json',
   ];
 
   for (const path of traversalPaths) {
-    const response = await fetch(`${baseUrl}${path}`);
-    const body = await response.text();
-    assert.notEqual(response.status, 200, `${path} must not be served`);
-    assert.deepEqual(JSON.parse(body), { error: 'No encontrado' }, `${path} must not leak a file`);
+    const response = await requestRawPath(path);
+    assert.equal(response.status, 404, `${path} must not be served`);
+    assert.deepEqual(JSON.parse(response.body), { error: 'No encontrado' }, `${path} must not leak a file`);
   }
 });
 

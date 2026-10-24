@@ -31,8 +31,8 @@ function isInsidePublicDir(filePath) {
 }
 
 export async function serveStatic(req, res, pathname) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Allow', 'GET, HEAD');
     throw new HttpError(405, 'Método no permitido');
   }
 
@@ -71,6 +71,11 @@ export async function serveStatic(req, res, pathname) {
     'Content-Type': contentTypes.get(extension) || 'application/octet-stream',
     'Content-Length': fileInfo.size,
   });
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+
   try {
     await pipeline(createReadStream(filePath), res);
   } catch (err) {

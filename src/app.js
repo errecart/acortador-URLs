@@ -18,7 +18,11 @@ function readTimeout(name, defaultValue) {
   return value;
 }
 
-export function createApp({ store }) {
+export function createApp({ store, baseUrl, events }) {
+  if (!events || typeof events.emit !== 'function') {
+    throw new TypeError('Se requiere un emisor de eventos para crear la aplicación');
+  }
+
   const requestTimeout = readTimeout('REQUEST_TIMEOUT_MS', 300_000);
   const headersTimeout = readTimeout('HEADERS_TIMEOUT_MS', 60_000);
   const keepAliveTimeout = readTimeout('KEEP_ALIVE_TIMEOUT_MS', 5_000);
@@ -42,7 +46,7 @@ export function createApp({ store }) {
     }
 
     try {
-      await routeRequest(req, res, url, store);
+      await routeRequest(req, res, url, store, baseUrl, events);
     } catch (err) {
       const status = err instanceof HttpError ? err.status : 500;
       if (!(err instanceof HttpError) || status >= 500) {
