@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f6f8">
+    <title>Acortador de enlaces</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main class="page-shell">
+      <header class="site-header">
+        <a class="brand" href="./index.html" aria-label="Acortador, inicio">
+          <span class="brand-mark" aria-hidden="true">↗</span>
+          <span>acortador</span>
+        </a>
+        <span class="header-note">Enlaces simples, al instante</span>
+      </header>
+
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">TU ESPACIO DE ENLACES</p>
+        <h1 id="page-title">Menos URL.<br><span>Más espacio.</span></h1>
+        <p class="intro-copy">Convertí cualquier enlace largo en uno corto y fácil de compartir.</p>
+      </section>
+
+      <section class="panel create-panel" aria-labelledby="create-title">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">EMPEZÁ POR ACÁ</p>
+            <h2 id="create-title">Acortá un enlace</h2>
+          </div>
+          <span class="heading-icon" aria-hidden="true">↘</span>
+        </div>
+        <form id="create-form" class="create-form">
+          <label for="destination-url">URL de destino</label>
+          <div class="input-row">
+            <input
+              id="destination-url"
+              name="url"
+              type="url"
+              placeholder="https://ejemplo.com/tu-enlace-largo"
+              autocomplete="url"
+              required
+            >
+            <button class="button button-primary" type="submit">
+              <span>Crear enlace</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </div>
+          <p id="form-message" class="form-message" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="links-section" aria-labelledby="links-title">
+        <div class="list-heading">
+          <div>
+            <p class="eyebrow">TU COLECCIÓN</p>
+            <h2 id="links-title">Tus enlaces</h2>
+          </div>
+          <span id="link-count" class="link-count">0 enlaces</span>
+        </div>
+        <div id="links-list" class="links-list" aria-live="polite">
+          <p class="loading-message">Cargando enlaces…</p>
+        </div>
+      </section>
+      <footer class="site-footer">Tus enlaces, siempre a mano.</footer>
+    </main>
+  </body>
+</html>

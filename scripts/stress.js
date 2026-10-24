@@ -2,9 +2,21 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
-const baseUrl = (process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
+const baseUrl = (process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000').replace(/\/+$/, '');
 const dataDir = resolve(process.env.DATA_DIR || './data');
 const expectedCount = 50;
+
+let initialLinks;
+try {
+  initialLinks = JSON.parse(await readFile(join(dataDir, 'links.json'), 'utf8'));
+} catch (err) {
+  if (err.code !== 'ENOENT') {
+    throw err;
+  }
+  initialLinks = [];
+}
+
+assert.ok(Array.isArray(initialLinks), 'links.json no contiene un array JSON inicial');
 
 const responses = await Promise.all(
   Array.from({ length: expectedCount }, (_, index) => fetch(`${baseUrl}/api/links`, {
@@ -32,4 +44,8 @@ if (fileError) {
 
 assert.ok(statuses.every((status) => status === 201), 'Al menos un POST no respondió 201');
 assert.ok(Array.isArray(storedLinks), 'links.json no contiene un array JSON');
-assert.equal(storedLinks.length, expectedCount, `Se esperaban ${expectedCount} enlaces`);
+assert.equal(
+  storedLinks.length,
+  initialLinks.length + expectedCount,
+  `Se esperaban ${initialLinks.length + expectedCount} enlaces`,
+);

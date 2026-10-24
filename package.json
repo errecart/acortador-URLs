@@ -1,12 +1,18 @@
 {
   "name": "acortador-urls",
   "version": "1.0.0",
-  "description": "Acortador de URLs con servidor HTTP nativo de Node.js.",
+  "description": "Zero-dependency self-hosted URL shortener with a web UI, JSON API, and CLI.",
   "main": "server.js",
+  "bin": {
+    "acortador-urls": "./bin/acortador.js"
+  },
   "scripts": {
     "dev": "node --watch --env-file=.env src/server.js",
     "start": "node --env-file=.env src/server.js",
-    "test": "node --test"
+    "prestart:secure": "node -e \"require('node:fs').mkdirSync('data', { recursive: true })\"",
+    "start:secure": "node scripts/start-secure.js",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage"
   },
   "repository": {
     "type": "git",
@@ -16,7 +22,8 @@
     "url-shortener",
     "shortener",
     "nodejs",
-    "http"
+    "http",
+    "zero-dependencies"
   ],
   "author": "errecart",
   "license": "MIT",
