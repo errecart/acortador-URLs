@@ -17,7 +17,7 @@ function hasStaticFileExtension(pathname) {
   }
 }
 
-export async function routeRequest(req, res, url, store) {
+export async function routeRequest(req, res, url, store, baseUrl, events) {
   const { pathname } = url;
 
   if (pathname === '/health') {
@@ -26,14 +26,14 @@ export async function routeRequest(req, res, url, store) {
   }
 
   if (pathname === '/api/links') {
-    await handleLinks(req, res, store);
+    await handleLinks(req, res, store, baseUrl, events);
     return;
   }
 
   const statsMatch = pathname.match(/^\/api\/links\/([\w-]{7})\/stats$/);
   if (statsMatch) {
-    if (req.method !== 'GET') {
-      res.setHeader('Allow', 'GET');
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.setHeader('Allow', 'GET, HEAD');
       throw new HttpError(405, 'Método no permitido');
     }
 
@@ -48,18 +48,18 @@ export async function routeRequest(req, res, url, store) {
       throw new HttpError(405, 'Método no permitido');
     }
 
-    await handleDeleteLink(res, linkMatch[1], store);
+    await handleDeleteLink(res, linkMatch[1], store, events);
     return;
   }
 
   const codeMatch = pathname.match(/^\/([\w-]{7})$/);
   if (codeMatch) {
-    if (req.method !== 'GET') {
-      res.setHeader('Allow', 'GET');
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.setHeader('Allow', 'GET, HEAD');
       throw new HttpError(405, 'Método no permitido');
     }
 
-    await handleRedirect(res, codeMatch[1], store);
+    await handleRedirect(res, codeMatch[1], store, events);
     return;
   }
 

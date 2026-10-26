@@ -1,19 +1,21 @@
-import { events } from './events.js';
 import { HttpError, readJsonBody, sendJson } from './http-utils.js';
 
-const baseUrl = process.env.API_URL || process.env.BASE_URL || 'http://localhost:3000';
-
 export function handleHealth(req, res) {
-  if (req.method !== 'GET') {
-    res.setHeader('Allow', 'GET');
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.setHeader('Allow', 'GET, HEAD');
     throw new HttpError(405, 'Método no permitido');
   }
 
   sendJson(res, 200, { status: 'ok' });
 }
 
-export async function handleLinks(req, res, store) {
+export async function handleLinks(req, res, store, baseUrl, events) {
   if (req.method === 'POST') {
+    const contentType = req.headers['content-type'];
+    if (typeof contentType !== 'string' || contentType.split(';', 1)[0].trim().toLowerCase() !== 'application/json') {
+      throw new HttpError(415, 'El Content-Type debe ser application/json');
+    }
+
     const body = await readJsonBody(req, res);
     if (body === undefined) {
       return;
@@ -37,29 +39,29 @@ export async function handleLinks(req, res, store) {
     if (destination.username || destination.password) {
       throw new HttpError(400, 'La URL no puede incluir usuario ni contraseña');
     }
-    if (destination.hostname.toLowerCase() === new URL(baseUrl).hostname.toLowerCase()) {
+    if (destination.hostname.toLowerCase() === baseUrl.hostname.toLowerCase()) {
       throw new HttpError(400, 'No se pueden acortar URLs del mismo dominio');
     }
 
     const link = await store.createLink(destination.href);
     sendJson(res, 201, {
       ...link,
-      shortUrl: `${baseUrl.replace(/\/+$/, '')}/${link.code}`,
+      shortUrl: `${baseUrl.origin}/${link.code}`,
     });
     events.emit('link:created', { code: link.code, at: new Date().toISOString() });
     return;
   }
 
-  if (req.method === 'GET') {
+  if (req.method === 'GET' || req.method === 'HEAD') {
     sendJson(res, 200, await store.listLinks());
     return;
   }
 
-  res.setHeader('Allow', 'GET, POST');
+  res.setHeader('Allow', 'GET, HEAD, POST');
   throw new HttpError(405, 'Método no permitido');
 }
 
-export async function handleRedirect(res, code, store) {
+export async function handleRedirect(res, code, store, events) {
   const link = await store.getLink(code);
   if (!link) {
     throw new HttpError(404, 'No encontrado');
@@ -89,7 +91,7 @@ export async function handleLinkStats(res, code, store) {
   });
 }
 
-export async function handleDeleteLink(res, code, store) {
+export async function handleDeleteLink(res, code, store, events) {
   if (!await store.deleteLink(code)) {
     throw new HttpError(404, 'No encontrado');
   }

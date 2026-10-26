@@ -29,18 +29,19 @@ El servidor guarda los enlaces en `data/links.json` y los eventos de acceso en `
 | Variable | Valor predeterminado | Propósito |
 | --- | --- | --- |
 | `PORT` | `3000` | Puerto HTTP donde escucha el servidor |
-| `API_URL` | `http://localhost:3000` | URL pública base para construir enlaces cortos; tiene prioridad sobre `BASE_URL` |
-| `BASE_URL` | `http://localhost:3000` | URL pública base alternativa y hostname usado para rechazar enlaces al mismo servicio |
+| `HOST` | `127.0.0.1` | Interfaz de red donde escucha el servidor; configurá `0.0.0.0` para aceptar conexiones externas |
+| `BASE_URL` | `http://localhost:3000` | Origen público HTTP o HTTPS para construir enlaces cortos y rechazar enlaces al mismo hostname; debe ser válido al iniciar el servidor |
+| `API_URL` | `http://localhost:3000` | URL del servidor API al que se conecta el CLI |
 | `DATA_DIR` | `./data` | Directorio para `links.json` y `access.log` |
 | `REQUEST_TIMEOUT_MS` | `300000` | Duración máxima de una solicitud |
 | `HEADERS_TIMEOUT_MS` | `60000` | Tiempo máximo para recibir los headers; no puede superar `REQUEST_TIMEOUT_MS` |
 | `KEEP_ALIVE_TIMEOUT_MS` | `5000` | Timeout de sockets keep-alive |
 
-Podés ajustar las variables del archivo de ejemplo para el desarrollo local. Configurá `API_URL`/`BASE_URL` con el origen desde donde se servirán los enlaces cortos.
+Podés ajustar las variables del archivo de ejemplo para el desarrollo local. Configurá `BASE_URL` con el origen desde donde se servirán los enlaces cortos. `API_URL` solo configura el servidor API al que se conecta el CLI.
 
 ## CLI
 
-Ejecutá el CLI directamente con Node o instalá el paquete localmente si querés usar el ejecutable `acortador-urls`:
+Ejecutá el CLI directamente con Node o enlazá el paquete localmente con `npm link` si querés usar el ejecutable `acortador-urls`:
 
 ```sh
 node bin/acortador.js create https://example.com/una-pagina-larga
@@ -83,13 +84,13 @@ Todas las respuestas de error son objetos JSON con una propiedad `error`. Los me
 
 | Método | Ruta | Éxito | Otros estados relevantes |
 | --- | --- | --- | --- |
-| `GET` | `/health` | `200` | `405` (`Allow: GET`) |
-| `GET` | `/api/links` | `200` — lista de enlaces | `405` (`Allow: GET, POST`) |
-| `POST` | `/api/links` | `201` — enlace creado y `shortUrl` | `400` URL o JSON inválido; `413` body mayor a 10 KiB; `405` |
-| `GET` | `/:code` | `302` redirección | `404` código desconocido; `405` (`Allow: GET`) |
-| `GET` | `/api/links/:code/stats` | `200` — estadísticas del enlace | `404` código desconocido; `405` (`Allow: GET`) |
+| `GET`, `HEAD` | `/health` | `200` | `405` (`Allow: GET, HEAD`) |
+| `GET`, `HEAD` | `/api/links` | `200` — lista de enlaces (`HEAD` sin body) | `405` (`Allow: GET, HEAD, POST`) |
+| `POST` | `/api/links` | `201` — enlace creado y `shortUrl` | `400` URL o JSON inválido; `413` body mayor a 10 KiB; `415` Content-Type distinto de `application/json`; `405` |
+| `GET`, `HEAD` | `/:code` | `302` redirección (`HEAD` sin body) | `404` código desconocido; `405` (`Allow: GET, HEAD`) |
+| `GET`, `HEAD` | `/api/links/:code/stats` | `200` — estadísticas del enlace (`HEAD` sin body) | `404` código desconocido; `405` (`Allow: GET, HEAD`) |
 | `DELETE` | `/api/links/:code` | `204` | `404` código desconocido; `405` (`Allow: DELETE`) |
-| `GET` | `/` y recursos públicos | `200` | `400` ruta mal formada o con byte nulo; `404` recurso inexistente; `405` |
+| `GET`, `HEAD` | `/` y recursos públicos | `200` (`HEAD` sin body) | `400` ruta mal formada o con byte nulo; `404` recurso inexistente; `405` (`Allow: GET, HEAD`) |
 
 Creá un enlace enviando JSON:
 
@@ -108,11 +109,12 @@ flowchart TD
   Browser[Interfaz web] -->|HTTP| Server[server.js]
   CLI[bin/acortador.js] -->|API HTTP| Server
   Server --> App[createApp / app.js]
+  Server --> Events[events.js]
+  Server --> AccessLog[createAccessLog / access-log.js]
   App --> Router[router.js]
   Router --> Handlers[handlers.js]
   Router --> Static[static.js]
   Handlers --> Store[createStore / store.js]
-  Handlers --> Events[events.js]
   Events --> AccessLog[createAccessLog / access-log.js]
   Store --> Links[(data/links.json)]
   AccessLog --> Log[(data/access.log)]
@@ -138,7 +140,7 @@ flowchart TD
 - Los bodies JSON tienen un máximo de 10 KiB. Las URLs de destino admiten hasta 2048 caracteres, solo HTTP(S), y se rechazan si incluyen usuario o contraseña.
 - Las respuestas incluyen Content Security Policy (`default-src 'self'`), `X-Content-Type-Options`, `Referrer-Policy` y `X-Frame-Options: DENY`.
 - Las rutas de recursos estáticos se validan contra traversal y bytes nulos.
-- `npm run start:secure` inicia Node con el modelo de permisos de filesystem. Permite leer la aplicación, los recursos públicos, `.env` y `data/`, y escribir solo dentro de `data/`. Crea `data/` antes de iniciar. Si cambia `DATA_DIR`, también hay que actualizar las rutas de permisos en `scripts/start-secure.js`.
+- `npm run start:secure` inicia Node con el modelo de permisos de filesystem. Permite leer la aplicación, los recursos públicos, `.env` y `data/`, y escribir solo dentro de `data/`. Crea `data/` antes de iniciar. Si cambia `DATA_DIR`, también hay que actualizar las rutas de permisos del comando en `package.json`. En Docker, invocá `node` directamente (en formato exec) con las mismas flags y creá `data/` antes de iniciar.
 - La aplicación está pensada para uso autoalojado y de confianza; agregá autenticación y controles operativos antes de exponer la administración de enlaces a usuarios no confiables.
 
 ## Tests

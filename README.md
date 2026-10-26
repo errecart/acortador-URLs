@@ -29,18 +29,19 @@ The server stores links in `data/links.json` and access events in `data/access.l
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `3000` | HTTP listening port |
-| `API_URL` | `http://localhost:3000` | Public base URL used to build short links; takes precedence over `BASE_URL` |
-| `BASE_URL` | `http://localhost:3000` | Fallback public base URL and hostname used to reject self-links |
+| `HOST` | `127.0.0.1` | Network interface the server listens on; set to `0.0.0.0` to accept external connections |
+| `BASE_URL` | `http://localhost:3000` | Public HTTP or HTTPS origin used to build short links and reject links to the same hostname; must be valid when the server starts |
+| `API_URL` | `http://localhost:3000` | API server URL used by the CLI |
 | `DATA_DIR` | `./data` | Directory for `links.json` and `access.log` |
 | `REQUEST_TIMEOUT_MS` | `300000` | Maximum request duration |
 | `HEADERS_TIMEOUT_MS` | `60000` | Maximum time allowed to receive request headers; cannot exceed `REQUEST_TIMEOUT_MS` |
 | `KEEP_ALIVE_TIMEOUT_MS` | `5000` | Keep-alive socket timeout |
 
-The example environment file can be adjusted for local development. Keep `API_URL`/`BASE_URL` pointed at the origin from which short links will be served.
+The example environment file can be adjusted for local development. Set `BASE_URL` to the origin from which short links will be served. `API_URL` configures only the API server used by the CLI.
 
 ## CLI
 
-Run the CLI directly with Node, or install the package locally if you want the `acortador-urls` executable:
+Run the CLI directly with Node, or link the package locally with `npm link` if you want the `acortador-urls` executable:
 
 ```sh
 node bin/acortador.js create https://example.com/a-long-page
@@ -83,13 +84,13 @@ All error responses are JSON objects with an `error` field. Human-readable serve
 
 | Method | Path | Success | Other relevant statuses |
 | --- | --- | --- | --- |
-| `GET` | `/health` | `200` | `405` (`Allow: GET`) |
-| `GET` | `/api/links` | `200` — array of links | `405` (`Allow: GET, POST`) |
-| `POST` | `/api/links` | `201` — created link and `shortUrl` | `400` invalid URL or JSON; `413` body over 10 KiB; `405` |
-| `GET` | `/:code` | `302` redirect | `404` unknown code; `405` (`Allow: GET`) |
-| `GET` | `/api/links/:code/stats` | `200` — link statistics | `404` unknown code; `405` (`Allow: GET`) |
+| `GET`, `HEAD` | `/health` | `200` | `405` (`Allow: GET, HEAD`) |
+| `GET`, `HEAD` | `/api/links` | `200` — array of links (`HEAD` with no body) | `405` (`Allow: GET, HEAD, POST`) |
+| `POST` | `/api/links` | `201` — created link and `shortUrl` | `400` invalid URL or JSON; `413` body over 10 KiB; `415` Content-Type other than `application/json`; `405` |
+| `GET`, `HEAD` | `/:code` | `302` redirect (`HEAD` with no body) | `404` unknown code; `405` (`Allow: GET, HEAD`) |
+| `GET`, `HEAD` | `/api/links/:code/stats` | `200` — link statistics (`HEAD` with no body) | `404` unknown code; `405` (`Allow: GET, HEAD`) |
 | `DELETE` | `/api/links/:code` | `204` | `404` unknown code; `405` (`Allow: DELETE`) |
-| `GET` | `/` and public assets | `200` | `400` malformed or null-byte path; `404` missing asset; `405` |
+| `GET`, `HEAD` | `/` and public assets | `200` (`HEAD` with no body) | `400` malformed or null-byte path; `404` missing asset; `405` (`Allow: GET, HEAD`) |
 
 Create a link with JSON:
 
@@ -108,11 +109,12 @@ flowchart TD
   Browser[Browser UI] -->|HTTP| Server[server.js]
   CLI[bin/acortador.js] -->|HTTP API| Server
   Server --> App[createApp / app.js]
+  Server --> Events[events.js]
+  Server --> AccessLog[createAccessLog / access-log.js]
   App --> Router[router.js]
   Router --> Handlers[handlers.js]
   Router --> Static[static.js]
   Handlers --> Store[createStore / store.js]
-  Handlers --> Events[events.js]
   Events --> AccessLog[createAccessLog / access-log.js]
   Store --> Links[(data/links.json)]
   AccessLog --> Log[(data/access.log)]
@@ -138,7 +140,7 @@ flowchart TD
 - JSON bodies are capped at 10 KiB. Destination URLs are capped at 2048 characters, limited to HTTP(S), and URLs containing username/password credentials are rejected.
 - Responses set a Content Security Policy (`default-src 'self'`), `X-Content-Type-Options`, `Referrer-Policy`, and `X-Frame-Options: DENY`.
 - Static paths are checked against traversal and null bytes.
-- `npm run start:secure` starts Node with its filesystem permission model. The script grants reads for the application, public assets, `.env`, and `data/`, and writes only under `data/`. It creates `data/` before startup. If `DATA_DIR` changes, update the permission paths in `scripts/start-secure.js` as well.
+- `npm run start:secure` starts Node with its filesystem permission model. The command grants reads for the application, public assets, `.env`, and `data/`, and writes only under `data/`. It creates `data/` before startup. If `DATA_DIR` changes, update the permission paths in `package.json` as well. In Docker, invoke `node` directly (using exec form) with the same flags and create `data/` before startup.
 - The application is intended for trusted, self-hosted use; add authentication and operational controls before exposing link management to untrusted users.
 
 ## Testing
