@@ -81,13 +81,6 @@ async function shutdown(signal) {
     console.error('Cierre demasiado lento; forzando salida.');
     process.exit(1);
   }, 10_000).unref();
-  try {
-    await store.flushStore();
-  } catch (err) {
-    console.error('No se pudieron persistir los cambios al cerrar:', err);
-    process.exitCode = 1;
-  }
-
   server.close(async (err) => {
     if (err) {
       console.error('No se pudo cerrar el servidor correctamente:', err);
@@ -97,7 +90,7 @@ async function shutdown(signal) {
     try {
       await store.flushStore();
     } catch (flushErr) {
-      console.error('No se pudieron persistir los cambios pendientes al cerrar:', flushErr);
+      console.error('No se pudieron persistir los cambios al cerrar:', flushErr);
       process.exitCode = 1;
     }
 

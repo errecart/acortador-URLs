@@ -78,6 +78,9 @@ function createLinkCard(link) {
   deleteButton.textContent = 'Borrar';
   deleteButton.setAttribute('aria-label', `Borrar enlace ${link.code}`);
   deleteButton.addEventListener('click', async () => {
+    if (!window.confirm(`¿Borrar el enlace ${link.code}?`)) {
+      return;
+    }
     deleteButton.disabled = true;
     try {
       await request(`/api/links/${encodeURIComponent(link.code)}`, { method: 'DELETE' });
