@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import { extname, isAbsolute, join, relative, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -54,7 +54,7 @@ export async function serveStatic(req, res, pathname) {
 
   let fileInfo;
   try {
-    fileInfo = await stat(filePath);
+    fileInfo = await lstat(filePath);
   } catch (err) {
     if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
       throw new HttpError(404, 'No encontrado');
@@ -62,14 +62,16 @@ export async function serveStatic(req, res, pathname) {
     throw err;
   }
 
-  if (!fileInfo.isFile()) {
+  if (!fileInfo.isFile() || fileInfo.isSymbolicLink()) {
     throw new HttpError(404, 'No encontrado');
   }
 
   const extension = extname(filePath).toLowerCase();
+  const isHtml = extension === '.html';
   res.writeHead(200, {
     'Content-Type': contentTypes.get(extension) || 'application/octet-stream',
     'Content-Length': fileInfo.size,
+    'Cache-Control': isHtml ? 'no-cache' : 'public, max-age=86400',
   });
   if (req.method === 'HEAD') {
     res.end();

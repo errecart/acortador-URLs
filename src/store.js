@@ -106,7 +106,11 @@ export function createStore({ dataDir = './data' } = {}) {
   async function createLink(url) {
     return enqueueStoreOperation(async () => {
       let code;
+      let attempts = 0;
       do {
+        if (++attempts > 10) {
+          throw new Error('No se pudo generar un código único tras 10 intentos');
+        }
         code = randomBytes(5).toString('base64url');
       } while (links.has(code));
 
